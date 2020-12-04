@@ -11,11 +11,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/ripple_animation.h"
 #include "ui/image/image.h"
 #include "ui/toast/toast.h"
-#include "ui/text_options.h"
+#include "ui/text/text_options.h"
 #include "history/history.h"
 #include "history/history_message.h"
 #include "history/view/history_view_service_message.h"
 #include "history/view/media/history_view_document.h"
+#include "core/click_handler_types.h"
 #include "mainwindow.h"
 #include "media/audio/media_audio.h"
 #include "media/player/media_player_instance.h"
@@ -27,8 +28,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "window/window_session_controller.h"
 #include "facades.h"
+#include "base/qt_adapters.h"
 #include "styles/style_widgets.h"
-#include "styles/style_history.h"
+#include "styles/style_chat.h"
 
 #include <QtGui/QGuiApplication>
 
@@ -44,7 +46,8 @@ void HistoryMessageVia::create(
 	bot = owner->user(userId);
 	maxWidth = st::msgServiceNameFont->width(
 		tr::lng_inline_bot_via(tr::now, lt_inline_bot, '@' + bot->username));
-	link = std::make_shared<LambdaClickHandler>([bot = this->bot] {
+	link = std::make_shared<LambdaClickHandler>([bot = this->bot](
+			ClickContext context) {
 		if (QGuiApplication::keyboardModifiers() == Qt::ControlModifier) {
 			if (const auto window = App::wnd()) {
 				if (const auto controller = window->sessionController()) {
@@ -53,7 +56,12 @@ void HistoryMessageVia::create(
 				}
 			}
 		}
-		App::insertBotCommand('@' + bot->username);
+		const auto my = context.other.value<ClickHandlerContext>();
+		if (const auto delegate = my.elementDelegate ? my.elementDelegate() : nullptr) {
+			delegate->elementHandleViaClick(bot);
+		} else {
+			App::insertBotCommand('@' + bot->username);
+		}
 	});
 }
 
@@ -73,6 +81,8 @@ void HistoryMessageVia::resize(int32 availw) const {
 }
 
 void HistoryMessageSigned::refresh(const QString &date) {
+	Expects(!isAnonymousRank);
+
 	auto name = author;
 	const auto time = qsl(", ") + date;
 	const auto timew = st::msgDateFont->width(time);
@@ -107,7 +117,7 @@ HiddenSenderInfo::HiddenSenderInfo(const QString &name)
 , colorPeerId(Data::FakePeerIdForJustName(name))
 , userpic(Data::PeerUserpicColor(colorPeerId), name) {
 	nameText.setText(st::msgNameStyle, name, Ui::NameTextOptions());
-	const auto parts = name.trimmed().split(' ', QString::SkipEmptyParts);
+	const auto parts = name.trimmed().split(' ', base::QStringSkipEmptyParts);
 	firstName = parts[0];
 	for (const auto &part : parts.mid(1)) {
 		if (!lastName.isEmpty()) {
@@ -155,7 +165,7 @@ void HistoryMessageForwarded::create(const HistoryMessageVia *via) const {
 		if (fromChannel || !psaType.isEmpty()) {
 			auto custom = psaType.isEmpty()
 				? QString()
-				: Lang::Current().getNonDefaultValue(
+				: Lang::GetNonDefaultValue(
 					kPsaForwardedPrefix + psaType.toUtf8());
 			phrase = !custom.isEmpty()
 				? custom.replace("{channel}", textcmdLink(1, phrase))
@@ -204,7 +214,9 @@ bool HistoryMessageReply::updateData(
 	}
 	if (!replyToMsg) {
 		replyToMsg = holder->history()->owner().message(
-			holder->channelId(),
+			(replyToPeerId
+				? peerToChannel(replyToPeerId)
+				: holder->channelId()),
 			replyToMsgId);
 		if (replyToMsg) {
 			if (replyToMsg->isEmpty()) {
@@ -762,7 +774,8 @@ void ReplyKeyboard::Style::paintButton(
 		}
 	}
 	paintButtonIcon(p, rect, outerWidth, button.type);
-	if (button.type == HistoryMessageMarkupButton::Type::Callback
+	if (button.type == HistoryMessageMarkupButton::Type::CallbackWithPassword
+		|| button.type == HistoryMessageMarkupButton::Type::Callback
 		|| button.type == HistoryMessageMarkupButton::Type::Game) {
 		if (auto data = button.link->getButton()) {
 			if (data->requestId) {
@@ -831,7 +844,9 @@ void HistoryMessageReplyMarkup::createFromButtonRows(
 					row.emplace_back(Type::Default, qs(data.vtext()));
 				}, [&](const MTPDkeyboardButtonCallback &data) {
 					row.emplace_back(
-						Type::Callback,
+						(data.is_requires_password()
+							? Type::CallbackWithPassword
+							: Type::Callback),
 						qs(data.vtext()),
 						qba(data.vdata()));
 				}, [&](const MTPDkeyboardButtonRequestGeoLocation &data) {

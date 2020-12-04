@@ -27,7 +27,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "layout.h"
 #include "app.h"
-#include "styles/style_history.h"
+#include "styles/style_chat.h"
 
 namespace HistoryView {
 namespace {
@@ -112,6 +112,23 @@ bool SimpleElementDelegate::elementIsGifPaused() {
 	return _controller->isGifPausedAtLeastFor(Window::GifPauseReason::Any);
 }
 
+bool SimpleElementDelegate::elementHideReply(not_null<const Element*> view) {
+	return false;
+}
+
+bool SimpleElementDelegate::elementShownUnread(
+		not_null<const Element*> view) {
+	return view->data()->unread();
+}
+
+void SimpleElementDelegate::elementSendBotCommand(
+	const QString &command,
+	const FullMsgId &context) {
+}
+
+void SimpleElementDelegate::elementHandleViaClick(not_null<UserData*> bot) {
+}
+
 TextSelection UnshiftItemSelection(
 		TextSelection selection,
 		uint16 byLength) {
@@ -140,8 +157,8 @@ TextSelection ShiftItemSelection(
 	return ShiftItemSelection(selection, byText.length());
 }
 
-void UnreadBar::init() {
-	text = tr::lng_unread_bar_some(tr::now);
+void UnreadBar::init(const QString &string) {
+	text = string;
 	width = st::semiboldFont->width(text);
 }
 
@@ -354,7 +371,7 @@ void Element::refreshMedia(Element *replacing) {
 	const auto media = item->media();
 	if (media && media->canBeGrouped()) {
 		if (const auto group = history()->owner().groups().find(item)) {
-			if (group->items.back() != item) {
+			if (group->items.front() != item) {
 				_media = nullptr;
 				_flags |= Flag::HiddenByGroup;
 			} else {
@@ -425,7 +442,8 @@ bool Element::computeIsAttachToPrevious(not_null<Element*> previous) {
 			&& mayBeAttached(item)
 			&& mayBeAttached(prev);
 		if (possible) {
-			if (item->history()->peer->isSelf()) {
+			if (item->history()->peer->isSelf()
+				|| item->history()->peer->isRepliesChat()) {
 				return IsAttachedToPreviousInSavedMessages(prev, item);
 			} else {
 				return prev->from() == item->from();
@@ -435,12 +453,18 @@ bool Element::computeIsAttachToPrevious(not_null<Element*> previous) {
 	return false;
 }
 
-void Element::createUnreadBar() {
+void Element::createUnreadBar(rpl::producer<QString> text) {
 	if (!AddComponents(UnreadBar::Bit())) {
 		return;
 	}
 	const auto bar = Get<UnreadBar>();
-	bar->init();
+	std::move(
+		text
+	) | rpl::start_with_next([=](const QString &text) {
+		if (const auto bar = Get<UnreadBar>()) {
+			bar->init(text);
+		}
+	}, bar->lifetime);
 	if (data()->mainView() == this) {
 		recountAttachToPreviousInBlocks();
 	}
@@ -474,8 +498,16 @@ bool Element::isInOneDayWithPrevious() const {
 }
 
 void Element::recountAttachToPreviousInBlocks() {
+	if (isHidden() || data()->isEmpty()) {
+		if (const auto next = nextDisplayedInBlocks()) {
+			next->recountAttachToPreviousInBlocks();
+		} else if (const auto previous = previousDisplayedInBlocks()) {
+			previous->setAttachToNext(false);
+		}
+		return;
+	}
 	auto attachToPrevious = false;
-	if (const auto previous = previousInBlocks()) {
+	if (const auto previous = previousDisplayedInBlocks()) {
 		attachToPrevious = computeIsAttachToPrevious(previous);
 		previous->setAttachToNext(attachToPrevious);
 	}
@@ -485,11 +517,11 @@ void Element::recountAttachToPreviousInBlocks() {
 void Element::recountDisplayDateInBlocks() {
 	setDisplayDate([&] {
 		const auto item = data();
-		if (item->isEmpty()) {
+		if (isHidden() || item->isEmpty()) {
 			return false;
 		}
 
-		if (const auto previous = previousInBlocks()) {
+		if (const auto previous = previousDisplayedInBlocks()) {
 			const auto prev = previous->data();
 			return prev->isEmpty()
 				|| (previous->dateTime().date() != dateTime().date());
@@ -582,8 +614,8 @@ bool Element::displayFastReply() const {
 	return false;
 }
 
-bool Element::displayRightAction() const {
-	return false;
+std::optional<QSize> Element::rightActionSize() const {
+	return std::nullopt;
 }
 
 void Element::drawRightAction(
@@ -605,6 +637,10 @@ TimeId Element::displayedEditDate() const {
 	return TimeId(0);
 }
 
+HistoryMessageReply *Element::displayedReply() const {
+	return nullptr;
+}
+
 bool Element::hasVisibleText() const {
 	return false;
 }
@@ -616,8 +652,12 @@ auto Element::verticalRepaintRange() const -> VerticalRepaintRange {
 	};
 }
 
+bool Element::hasHeavyPart() const {
+	return false;
+}
+
 void Element::checkHeavyPart() {
-	if (!_media || !_media->hasHeavyPart()) {
+	if (!hasHeavyPart() && (!_media || !_media->hasHeavyPart())) {
 		history()->owner().unregisterHeavyViewPart(this);
 	}
 }
@@ -688,6 +728,14 @@ Element *Element::previousInBlocks() const {
 	return nullptr;
 }
 
+Element *Element::previousDisplayedInBlocks() const {
+	auto result = previousInBlocks();
+	while (result && (result->data()->isEmpty() || result->isHidden())) {
+		result = result->previousInBlocks();
+	}
+	return result;
+}
+
 Element *Element::nextInBlocks() const {
 	if (_block && _indexInBlock >= 0) {
 		if (_indexInBlock + 1 < _block->messages.size()) {
@@ -699,6 +747,14 @@ Element *Element::nextInBlocks() const {
 		}
 	}
 	return nullptr;
+}
+
+Element *Element::nextDisplayedInBlocks() const {
+	auto result = nextInBlocks();
+	while (result && (result->data()->isEmpty() || result->isHidden())) {
+		result = result->nextInBlocks();
+	}
+	return result;
 }
 
 void Element::drawInfo(

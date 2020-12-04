@@ -24,6 +24,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/window.h"
 #include "ui/effects/ripple_animation.h"
 #include "ui/image/image.h"
+#include "ui/text/format_values.h"
 #include "ui/wrap/fade_wrap.h"
 #include "ui/wrap/padding_wrap.h"
 #include "ui/platform/ui_platform_utility.h"
@@ -38,11 +39,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "platform/platform_specific.h"
 #include "base/platform/base_platform_info.h"
 #include "window/main_window.h"
-#include "layout.h"
 #include "app.h"
 #include "webrtc/webrtc_video_track.h"
 #include "styles/style_calls.h"
-#include "styles/style_history.h"
+#include "styles/style_chat.h"
 
 #ifdef Q_OS_WIN
 #include "ui/platform/win/ui_window_title_win.h"
@@ -981,7 +981,7 @@ void Panel::paint(QRect clip) {
 	if (!_incoming->isHidden()) {
 		region = region.subtracted(QRegion(_incoming->geometry()));
 	}
-	for (const auto rect : region.rects()) {
+	for (const auto rect : region) {
 		p.fillRect(rect, st::callBgOpaque);
 	}
 	if (_incoming && _incoming->isHidden()) {
@@ -1070,7 +1070,7 @@ void Panel::updateStatusText(State state) {
 				auto durationMs = _call->getDurationMs();
 				auto durationSeconds = durationMs / 1000;
 				startDurationUpdateTimer(durationMs);
-				return formatDurationText(durationSeconds);
+				return Ui::FormatDurationText(durationSeconds);
 			}
 			return tr::lng_call_status_ended(tr::now);
 		} break;

@@ -21,10 +21,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 class RPCError;
 struct FileLoadResult;
-struct FileMediaInformation;
 struct SendingAlbum;
 enum class SendMediaType;
-enum class CompressConfirm;
 class MessageLinksParser;
 
 namespace SendMenu {
@@ -40,12 +38,8 @@ namespace Layout {
 class ItemBase;
 class Widget;
 } // namespace Layout
-class Result;
+struct ResultSelected;
 } // namespace InlineBots
-
-namespace Data {
-struct Draft;
-} // namespace Data
 
 namespace Support {
 class Autocomplete;
@@ -66,6 +60,9 @@ class SilentToggle;
 class FlatButton;
 class LinkButton;
 class RoundButton;
+class PinnedBar;
+struct PreparedList;
+class SendFilesWay;
 namespace Toast {
 class Instance;
 } // namespace Toast
@@ -83,7 +80,6 @@ class TabbedSelector;
 
 namespace Storage {
 enum class MimeDataState;
-struct PreparedList;
 struct UploadedPhoto;
 struct UploadedDocument;
 struct UploadedThumbDocument;
@@ -93,6 +89,11 @@ namespace HistoryView {
 class TopBarWidget;
 class ContactStatus;
 class Element;
+class PinnedTracker;
+namespace Controls {
+class RecordLock;
+class VoiceRecordBar;
+} // namespace Controls
 } // namespace HistoryView
 
 class DragArea;
@@ -103,10 +104,10 @@ class HistoryInner;
 struct HistoryMessageMarkupButton;
 
 class HistoryWidget final : public Window::AbstractSectionWidget {
-	Q_OBJECT
-
 public:
 	using FieldHistoryAction = Ui::InputField::HistoryAction;
+	using RecordLock = HistoryView::Controls::RecordLock;
+	using VoiceRecordBar = HistoryView::Controls::VoiceRecordBar;
 
 	HistoryWidget(
 		QWidget *parent,
@@ -182,8 +183,6 @@ public:
 	void replyToMessage(not_null<HistoryItem*> item);
 	void editMessage(FullMsgId itemId);
 	void editMessage(not_null<HistoryItem*> item);
-	void pinMessage(FullMsgId itemId);
-	void unpinMessage(FullMsgId itemId);
 
 	MsgId replyToId() const;
 	bool lastForceReplyReplied(const FullMsgId &replyTo) const;
@@ -201,9 +200,6 @@ public:
 
 	void updatePreview();
 	void previewCancel();
-
-	bool recordingAnimationCallback(crl::time now);
-	void stopRecording(bool send);
 
 	void escape();
 
@@ -239,7 +235,11 @@ public:
 
 	void updateFieldSubmitSettings();
 
+	void activate();
 	void setInnerFocus();
+	[[nodiscard]] rpl::producer<> cancelRequests() const {
+		return _cancelRequests.events();
+	}
 
 	void updateNotifyControls();
 
@@ -288,59 +288,9 @@ protected:
 	void mouseReleaseEvent(QMouseEvent *e) override;
 	void mouseMoveEvent(QMouseEvent *e) override;
 
-signals:
-	void cancelled();
-
-public slots:
-	void onScroll();
-
-	void onBroadcastSilentChange();
-
-	void activate();
-	void onTextChange();
-
-	void onFieldTabbed();
-
-	void onWindowVisibleChanged();
-
-	void onFieldFocused();
-	void onFieldResize();
-	void onCheckFieldAutocomplete();
-	void onScrollTimer();
-
-	void onDraftSaveDelayed();
-	void onDraftSave(bool delayed = false);
-	void onCloudDraftSave();
-
-	void onRecordError();
-	void onRecordDone(QByteArray result, VoiceWaveform waveform, qint32 samples);
-	void onRecordUpdate(quint16 level, qint32 samples);
-
-	void onUpdateHistoryItems();
-
-	// checks if we are too close to the top or to the bottom
-	// in the scroll area and preloads history if needed
-	void preloadHistoryIfNeeded();
-
-private slots:
-	void onHashtagOrBotCommandInsert(QString str, FieldAutocomplete::ChooseMethod method);
-	void onMentionInsert(UserData *user);
-	void onInlineBotCancel();
-	void onMembersDropdownShow();
-
 private:
 	using TabbedPanel = ChatHelpers::TabbedPanel;
 	using TabbedSelector = ChatHelpers::TabbedSelector;
-	struct PinnedBar {
-		PinnedBar(MsgId msgId, HistoryWidget *parent);
-		~PinnedBar();
-
-		MsgId msgId = 0;
-		HistoryItem *msg = nullptr;
-		Ui::Text::String text;
-		object_ptr<Ui::IconButton> cancel;
-		object_ptr<Ui::PlainShadow> shadow;
-	};
 	enum ScrollChangeType {
 		ScrollChangeNone,
 
@@ -362,10 +312,38 @@ private:
 	friend inline constexpr bool is_flag_type(TextUpdateEvent) { return true; };
 
 	void initTabbedSelector();
+	void initVoiceRecordBar();
 	void refreshTabbedPanel();
 	void createTabbedPanel();
 	void setTabbedPanel(std::unique_ptr<TabbedPanel> panel);
 	void updateField();
+	void fieldChanged();
+	void fieldTabbed();
+	void fieldFocused();
+	void fieldResized();
+
+	void insertHashtagOrBotCommand(
+		QString str,
+		FieldAutocomplete::ChooseMethod method);
+	void insertMention(UserData *user);
+	void cancelInlineBot();
+	void saveDraft(bool delayed = false);
+	void saveCloudDraft();
+	void saveDraftDelayed();
+	void checkFieldAutocomplete();
+	void showMembersDropdown();
+	void windowIsVisibleChanged();
+
+	// Checks if we are too close to the top or to the bottom
+	// in the scroll area and preloads history if needed.
+	void preloadHistoryIfNeeded();
+
+	void handleScroll();
+	void scrollByTimer();
+	void updateHistoryItemsByTimer();
+
+	[[nodiscard]] Dialogs::EntryState computeDialogsEntryState() const;
+	void refreshTopBarActiveChat();
 
 	void requestMessageData(MsgId msgId);
 	void messageDataReceived(ChannelData *channel, MsgId msgId);
@@ -397,9 +375,6 @@ private:
 	void unblockUser();
 	void sendBotStartCommand();
 	void joinChannel();
-	void goToDiscussionGroup();
-
-	[[nodiscard]] bool hasDiscussionGroup() const;
 
 	void supportInitAutocomplete();
 	void supportInsertText(const QString &text);
@@ -415,9 +390,6 @@ private:
 
 	void animationCallback();
 	void updateOverStates(QPoint pos);
-	void recordStartCallback();
-	void recordStopCallback(bool active);
-	void recordUpdateCallback(QPoint globalPos);
 	void chooseAttach();
 	void historyDownAnimationFinish();
 	void unreadMentionsAnimationFinish();
@@ -427,33 +399,29 @@ private:
 	bool canSendFiles(not_null<const QMimeData*> data) const;
 	bool confirmSendingFiles(
 		const QStringList &files,
-		CompressConfirm compressed,
-		const QString &insertTextOnCancel = QString());
+		const QString &insertTextOnCancel);
 	bool confirmSendingFiles(
 		QImage &&image,
 		QByteArray &&content,
-		CompressConfirm compressed,
+		std::optional<bool> overrideSendImagesAsPhotos = std::nullopt,
 		const QString &insertTextOnCancel = QString());
 	bool confirmSendingFiles(
 		not_null<const QMimeData*> data,
-		CompressConfirm compressed,
+		std::optional<bool> overrideSendImagesAsPhotos,
 		const QString &insertTextOnCancel = QString());
 	bool confirmSendingFiles(
-		Storage::PreparedList &&list,
-		CompressConfirm compressed,
+		Ui::PreparedList &&list,
 		const QString &insertTextOnCancel = QString());
-	bool showSendingFilesError(const Storage::PreparedList &list) const;
+	bool showSendingFilesError(const Ui::PreparedList &list) const;
+
+	void sendingFilesConfirmed(
+		Ui::PreparedList &&list,
+		Ui::SendFilesWay way,
+		TextWithTags &&caption,
+		Api::SendOptions options,
+		bool ctrlShiftEnter);
 
 	void uploadFile(const QByteArray &fileContent, SendMediaType type);
-
-	void uploadFilesAfterConfirmation(
-		Storage::PreparedList &&list,
-		SendMediaType type,
-		TextWithTags &&caption,
-		MsgId replyTo,
-		Api::SendOptions options,
-		std::shared_ptr<SendingAlbum> album = nullptr);
-
 	void itemRemoved(not_null<const HistoryItem*> item);
 
 	// Updates position of controls around the message field,
@@ -479,6 +447,7 @@ private:
 	bool replyToNextMessage();
 	[[nodiscard]] bool showSlowmodeError();
 
+	void hideChildWidgets();
 	void hideSelectorControlsAnimated();
 	int countMembersDropdownHeightMax() const;
 
@@ -498,14 +467,15 @@ private:
 	void updateReplyEditTexts(bool force = false);
 	void updateReplyEditText(not_null<HistoryItem*> item);
 
-	void updatePinnedBar(bool force = false);
-	bool pinnedMsgVisibilityUpdated();
-	void destroyPinnedBar();
+	void updatePinnedViewer();
+	void setupPinnedTracker();
+	void checkPinnedBarState();
+	void refreshPinnedBarButton(bool many);
+	void checkLastPinnedClickedIdReset(
+		int wasScrollTop,
+		int nowScrollTop);
 
-	void sendInlineResult(
-		not_null<InlineBots::Result*> result,
-		not_null<UserData*> bot,
-		Api::SendOptions options);
+	void sendInlineResult(InlineBots::ResultSelected result);
 
 	void drawField(Painter &p, const QRect &rect);
 	void paintEditHeader(
@@ -513,8 +483,6 @@ private:
 		const QRect &rect,
 		int left,
 		int top) const;
-	void drawRecording(Painter &p, float64 recordActive);
-	void drawPinnedBar(Painter &p);
 	void drawRestrictedWrite(Painter &p, const QString &error);
 	bool paintShowAnimationFrame();
 
@@ -537,8 +505,6 @@ private:
 	void addMessagesToFront(PeerData *peer, const QVector<MTPMessage> &messages);
 	void addMessagesToBack(PeerData *peer, const QVector<MTPMessage> &messages);
 
-	static void UnpinMessage(not_null<PeerData*> peer);
-
 	void updateHistoryGeometry(bool initial = false, bool loadedDown = false, const ScrollChange &change = { ScrollChangeNone, 0 });
 	void updateListSize();
 
@@ -556,8 +522,9 @@ private:
 	// This one is syntetic.
 	void synteticScrollToY(int y);
 
-	void writeDrafts(Data::Draft **localDraft, Data::Draft **editDraft);
-	void writeDrafts(History *history);
+	void writeDrafts();
+	void writeDraftTexts();
+	void writeDraftCursors();
 	void setFieldText(
 		const TextWithTags &textWithTags,
 		TextUpdateEvents events = 0,
@@ -587,6 +554,8 @@ private:
 	void inlineBotResolveDone(const MTPcontacts_ResolvedPeer &result);
 	void inlineBotResolveFail(const RPCError &error, const QString &username);
 
+	bool isRecording() const;
+
 	bool isBotStart() const;
 	bool isBlocked() const;
 	bool isJoinChannel() const;
@@ -599,6 +568,8 @@ private:
 
 	void setupScheduledToggle();
 	void refreshScheduledToggle();
+
+	bool kbWasHidden() const;
 
 	MTP::Sender _api;
 	MsgId _replyToId = 0;
@@ -617,7 +588,12 @@ private:
 
 	object_ptr<Ui::IconButton> _fieldBarCancel;
 
-	std::unique_ptr<PinnedBar> _pinnedBar;
+	std::unique_ptr<HistoryView::PinnedTracker> _pinnedTracker;
+	std::unique_ptr<Ui::PinnedBar> _pinnedBar;
+	int _pinnedBarHeight = 0;
+	bool _preserveScrollTop = false;
+	FullMsgId _pinnedClickedId;
+	std::optional<FullMsgId> _minPinnedId;
 
 	mtpRequestId _saveEditMsgRequestId = 0;
 
@@ -663,7 +639,7 @@ private:
 
 	int _lastScrollTop = 0; // gifs optimization
 	crl::time _lastScrolled = 0;
-	QTimer _updateHistoryItems;
+	base::Timer _updateHistoryItems;
 
 	crl::time _lastUserScrolled = 0;
 	bool _synteticScrollEvent = false;
@@ -689,12 +665,11 @@ private:
 
 	std::unique_ptr<HistoryView::ContactStatus> _contactStatus;
 
-	object_ptr<Ui::SendButton> _send;
+	const std::shared_ptr<Ui::SendButton> _send;
 	object_ptr<Ui::FlatButton> _unblock;
 	object_ptr<Ui::FlatButton> _botStart;
 	object_ptr<Ui::FlatButton> _joinChannel;
 	object_ptr<Ui::FlatButton> _muteUnmute;
-	object_ptr<Ui::FlatButton> _discuss;
 	object_ptr<Ui::IconButton> _attachToggle;
 	object_ptr<Ui::EmojiButton> _tabbedSelectorToggle;
 	object_ptr<Ui::IconButton> _botKeyboardShow;
@@ -702,22 +677,11 @@ private:
 	object_ptr<Ui::IconButton> _botCommandStart;
 	object_ptr<Ui::SilentToggle> _silent = { nullptr };
 	object_ptr<Ui::IconButton> _scheduled = { nullptr };
+	const std::unique_ptr<VoiceRecordBar> _voiceRecordBar;
 	bool _cmdStartShown = false;
 	object_ptr<Ui::InputField> _field;
-	bool _recording = false;
-	bool _inField = false;
 	bool _inReplyEditForward = false;
-	bool _inPinnedMsg = false;
 	bool _inClickable = false;
-	int _recordingSamples = 0;
-	int _recordCancelWidth;
-
-	// This can animate for a very long time (like in music playing),
-	// so it should be a Basic, not a Simple animation.
-	Ui::Animations::Basic _recordingAnimation;
-	anim::value _recordingLevel;
-
-	bool kbWasHidden() const;
 
 	bool _kbShown = false;
 	HistoryItem *_kbReplyTo = nullptr;
@@ -725,7 +689,7 @@ private:
 	QPointer<BotKeyboard> _keyboard;
 
 	object_ptr<Ui::InnerDropdown> _membersDropdown = { nullptr };
-	QTimer _membersDropdownShowTimer;
+	base::Timer _membersDropdownShowTimer;
 
 	object_ptr<InlineBots::Layout::Widget> _inlineResults = { nullptr };
 	std::unique_ptr<TabbedPanel> _tabbedPanel;
@@ -744,7 +708,7 @@ private:
 	Window::SlideDirection _showDirection;
 	QPixmap _cacheUnder, _cacheOver;
 
-	QTimer _scrollTimer;
+	base::Timer _scrollTimer;
 	int32 _scrollDelta = 0;
 
 	MsgId _highlightedMessageId = 0;
@@ -754,7 +718,8 @@ private:
 
 	crl::time _saveDraftStart = 0;
 	bool _saveDraftText = false;
-	QTimer _saveDraftTimer, _saveCloudDraftTimer;
+	base::Timer _saveDraftTimer;
+	base::Timer _saveCloudDraftTimer;
 
 	base::weak_ptr<Ui::Toast::Instance> _topToast;
 
@@ -762,5 +727,7 @@ private:
 	bool _inGrab = false;
 
 	int _topDelta = 0;
+
+	rpl::event_stream<> _cancelRequests;
 
 };

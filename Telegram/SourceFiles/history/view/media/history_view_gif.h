@@ -69,7 +69,8 @@ public:
 	}
 
 	bool fullFeaturedGrouped(RectParts sides) const;
-	QSize sizeForGrouping() const override;
+	QSize sizeForGroupingOptimal(int maxWidth) const override;
+	QSize sizeForGrouping(int width) const override;
 	void drawGrouped(
 		Painter &p,
 		const QRect &clip,
@@ -99,7 +100,7 @@ public:
 	QString additionalInfoString() const override;
 
 	bool skipBubbleTail() const override {
-		return isBubbleBottom() && _caption.isEmpty();
+		return isRoundedInBubbleBottom() && _caption.isEmpty();
 	}
 	bool isReadyForOpen() const override;
 

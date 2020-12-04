@@ -21,7 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/scroll_area.h"
 #include "ui/widgets/input_fields.h"
 #include "ui/wrap/slide_wrap.h"
-#include "ui/text_options.h"
+#include "ui/text/text_options.h"
 #include "chat_helpers/message_field.h"
 #include "chat_helpers/send_context_menu.h"
 #include "history/history.h"
@@ -40,7 +40,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/application.h"
 #include "styles/style_layers.h"
 #include "styles/style_boxes.h"
-#include "styles/style_history.h"
+#include "styles/style_chat.h"
 
 class ShareBox::Inner final : public Ui::RpWidget, private base::Subscriber {
 public:
@@ -635,7 +635,11 @@ void ShareBox::Inner::updateChat(not_null<PeerData*> peer) {
 void ShareBox::Inner::updateChatName(
 		not_null<Chat*> chat,
 		not_null<PeerData*> peer) {
-	const auto text = peer->isSelf() ? tr::lng_saved_messages(tr::now) : peer->name;
+	const auto text = peer->isSelf()
+		? tr::lng_saved_messages(tr::now)
+		: peer->isRepliesChat()
+		? tr::lng_replies_messages(tr::now)
+		: peer->name;
 	chat->name.setText(st::shareNameStyle, text, Ui::NameTextOptions());
 }
 

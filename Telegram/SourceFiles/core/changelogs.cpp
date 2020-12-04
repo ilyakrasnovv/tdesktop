@@ -22,26 +22,6 @@ namespace {
 std::map<int, const char*> BetaLogs() {
 	return {
 	{
-		1009020,
-		"- Fix crash in shared links search.\n"
-
-		"- Fix blurred thumbnails in albums with video files.\n"
-
-		"- Fix a possible crash in animated stickers rendering."
-	},
-	{
-		1009022,
-		"- Organize chats into Chat Folders if you have too many chats.\n"
-	},
-	{
-		2000001,
-		"- Switch between folders using Ctrl+1, ..., Ctrl+8.\n"
-
-		"- Fix crash when a pinned in folder chat was added to archive.\n"
-
-		"- Fix font issues in Linux version."
-	},
-	{
 		2001008,
 		"- Add support for full group message history export.\n"
 
@@ -95,22 +75,38 @@ std::map<int, const char*> BetaLogs() {
 
 		"- Enjoy dark native window frame for Telegram night mode on Windows.\n"
 	},
+	{
+		2004006,
+		"- Fix image compression option when sending files with drag-n-drop.\n"
+
+		"- Fix caption text selection in media albums.\n"
+
+		"- Fix drafts display in personal chats in the chats list.\n"
+
+		"- Bug fixes and other minor improvements.\n"
+	},
+	{
+		2004008,
+		"- Upgrade several third party libraries to latest versions.\n"
+	},
+	{
+		2004010,
+		"- Use inline bots and sticker by emoji suggestions in channel comments.\n"
+
+		"- Lock voice message recording, listen to your voice message before sending.\n"
+	},
+	{
+		2004011,
+		"- Improve locked voice message recording.\n"
+
+		"- Fix main window closing to tray on Windows.\n"
+
+		"- Fix crash in bot command sending.\n"
+
+		"- Fix adding additional photos when sending an album to a group with enabled slow mode.\n"
+	},
 	};
 };
-
-QString FormatVersionDisplay(int version) {
-	return QString::number(version / 1000000)
-		+ '.' + QString::number((version % 1000000) / 1000)
-		+ ((version % 1000)
-			? ('.' + QString::number(version % 1000))
-			: QString());
-}
-
-QString FormatVersionPrecise(int version) {
-	return QString::number(version / 1000000)
-		+ '.' + QString::number((version % 1000000) / 1000)
-		+ '.' + QString::number(version % 1000);
-}
 
 } // namespace
 
@@ -214,6 +210,20 @@ void Changelogs::addBetaLog(int changeVersion, const char *changes) {
 	const auto version = FormatVersionDisplay(changeVersion);
 	const auto log = qsl("New in version %1:\n\n").arg(version) + text;
 	addLocalLog(log);
+}
+
+QString FormatVersionDisplay(int version) {
+	return QString::number(version / 1000000)
+		+ '.' + QString::number((version % 1000000) / 1000)
+		+ ((version % 1000)
+			? ('.' + QString::number(version % 1000))
+			: QString());
+}
+
+QString FormatVersionPrecise(int version) {
+	return QString::number(version / 1000000)
+		+ '.' + QString::number((version % 1000000) / 1000)
+		+ '.' + QString::number(version % 1000);
 }
 
 } // namespace Core

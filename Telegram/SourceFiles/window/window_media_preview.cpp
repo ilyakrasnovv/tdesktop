@@ -20,7 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 #include "styles/style_layers.h"
 #include "styles/style_chat_helpers.h"
-#include "styles/style_history.h"
+#include "styles/style_chat.h"
 
 namespace Window {
 namespace {
@@ -248,7 +248,7 @@ void MediaPreviewWidget::setupLottie() {
 
 	_lottie->updates(
 	) | rpl::start_with_next([=](Lottie::Update update) {
-		update.data.match([&](const Lottie::Information &) {
+		v::match(update.data, [&](const Lottie::Information &) {
 			this->update();
 		}, [&](const Lottie::DisplayFrameRequest &) {
 			this->update(updateArea());
@@ -375,8 +375,8 @@ void MediaPreviewWidget::validateGifAnimation() {
 	};
 	if (contentLoaded) {
 		_gif = Media::Clip::MakeReader(
-			_documentMedia.get(),
-			FullMsgId(),
+			_documentMedia->owner()->location(),
+			_documentMedia->bytes(),
 			std::move(callback));
 	} else {
 		_gifThumbnail = Media::Clip::MakeReader(

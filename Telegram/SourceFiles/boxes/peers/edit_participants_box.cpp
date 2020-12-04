@@ -557,6 +557,8 @@ UserData *ParticipantsAdditionalData::applyParticipant(
 			return logBad();
 		}
 		return applyBanned(data);
+	}, [&](const MTPDchannelParticipantLeft &data) {
+		return logBad();
 	});
 }
 
@@ -564,6 +566,12 @@ UserData *ParticipantsAdditionalData::applyCreator(
 		const MTPDchannelParticipantCreator &data) {
 	if (const auto user = applyRegular(data.vuser_id())) {
 		_creator = user;
+		_adminRights[user] = data.vadmin_rights();
+		if (user->isSelf()) {
+			_adminCanEdit.emplace(user);
+		} else {
+			_adminCanEdit.erase(user);
+		}
 		if (const auto rank = data.vrank()) {
 			_adminRanks[user] = qs(*rank);
 		} else {
@@ -1459,11 +1467,7 @@ base::unique_qptr<Ui::PopupMenu> ParticipantsBoxController::rowContextMenu(
 
 void ParticipantsBoxController::showAdmin(not_null<UserData*> user) {
 	const auto adminRights = _additional.adminRights(user);
-	const auto currentRights = _additional.isCreator(user)
-		? MTPChatAdminRights(MTP_chatAdminRights(
-			MTP_flags(~MTPDchatAdminRights::Flag::f_add_admins
-				| MTPDchatAdminRights::Flag::f_add_admins)))
-		: adminRights
+	const auto currentRights = adminRights
 		? *adminRights
 		: MTPChatAdminRights(MTP_chatAdminRights(MTP_flags(0)));
 	auto box = Box<EditAdminBox>(
@@ -1504,6 +1508,7 @@ void ParticipantsBoxController::editAdminDone(
 		_additional.applyParticipant(MTP_channelParticipantCreator(
 			MTP_flags(rank.isEmpty() ? Flag(0) : Flag::f_rank),
 			MTP_int(user->bareId()),
+			rights,
 			MTP_string(rank)));
 	} else if (rights.c_chatAdminRights().vflags().v == 0) {
 		_additional.applyParticipant(MTP_channelParticipant(
@@ -1783,6 +1788,7 @@ std::unique_ptr<PeerListRow> ParticipantsBoxController::createRow(
 	auto row = std::make_unique<PeerListRowWithLink>(user);
 	refreshCustomStatus(row.get());
 	if (_role == Role::Admins
+		&& !_additional.isCreator(user)
 		&& _additional.adminRights(user).has_value()
 		&& _additional.canEditAdmin(user)) {
 		row->setActionLink(tr::lng_profile_kick(tr::now));

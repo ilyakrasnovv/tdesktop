@@ -47,8 +47,6 @@ using Manager = Platform::Notifications::Manager;
 
 } // namespace
 
-NSImage *qt_mac_create_nsimage(const QPixmap &pm);
-
 @interface NotificationDelegate : NSObject<NSUserNotificationCenterDelegate> {
 }
 
@@ -216,7 +214,11 @@ private:
 	};
 	struct ClearFinish {
 	};
-	using ClearTask = base::variant<ClearFromHistory, ClearFromSession, ClearAll, ClearFinish>;
+	using ClearTask = std::variant<
+		ClearFromHistory,
+		ClearFromSession,
+		ClearAll,
+		ClearFinish>;
 	std::vector<ClearTask> _clearingTasks;
 
 };
@@ -260,8 +262,10 @@ void Manager::Private::showNotification(
 	if (!hideNameAndPhoto && [notification respondsToSelector:@selector(setContentImage:)]) {
 		auto userpic = peer->isSelf()
 			? Ui::EmptyUserpic::GenerateSavedMessages(st::notifyMacPhotoSize)
+			: peer->isRepliesChat()
+			? Ui::EmptyUserpic::GenerateRepliesMessages(st::notifyMacPhotoSize)
 			: peer->genUserpic(userpicView, st::notifyMacPhotoSize);
-		NSImage *img = [qt_mac_create_nsimage(userpic) autorelease];
+		NSImage *img = Q2NSImage(userpic.toImage());
 		[notification setContentImage:img];
 	}
 
@@ -285,21 +289,20 @@ void Manager::Private::clearingThreadLoop() {
 		auto clearFromSessions = base::flat_set<uint64>();
 		{
 			std::unique_lock<std::mutex> lock(_clearingMutex);
-
 			while (_clearingTasks.empty()) {
 				_clearingCondition.wait(lock);
 			}
 			for (auto &task : _clearingTasks) {
-				if (base::get_if<ClearFinish>(&task)) {
+				v::match(task, [&](ClearFinish) {
 					finished = true;
 					clearAll = true;
-				} else if (base::get_if<ClearAll>(&task)) {
+				}, [&](ClearAll) {
 					clearAll = true;
-				} else if (auto fromHistory = base::get_if<ClearFromHistory>(&task)) {
-					clearFromPeers.emplace(fromHistory->fullPeer);
-				} else if (auto fromSession = base::get_if<ClearFromSession>(&task)) {
-					clearFromSessions.emplace(fromSession->sessionId);
-				}
+				}, [&](const ClearFromHistory &value) {
+					clearFromPeers.emplace(value.fullPeer);
+				}, [&](const ClearFromSession &value) {
+					clearFromSessions.emplace(value.sessionId);
+				});
 			}
 			_clearingTasks.clear();
 		}

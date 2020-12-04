@@ -154,16 +154,16 @@ void WrapWidget::injectActivePeerProfile(not_null<PeerData*> peer) {
 			? _historyStack.front().section->section().mediaType()
 			: _controller->section().mediaType();
 	}();
-	const auto expectedType = peer->isSelf()
+	const auto expectedType = peer->sharedMediaInfo()
 		? Section::Type::Media
 		: Section::Type::Profile;
-	const auto expectedMediaType = peer->isSelf()
+	const auto expectedMediaType = peer->sharedMediaInfo()
 		? Section::MediaType::Photo
 		: Section::MediaType::kCount;
 	if (firstSectionType != expectedType
 		|| firstSectionMediaType != expectedMediaType
 		|| firstPeer != peer) {
-		auto section = peer->isSelf()
+		auto section = peer->sharedMediaInfo()
 			? Section(Section::MediaType::Photo)
 			: Section(Section::Type::Profile);
 		injectActiveProfileMemento(std::move(
@@ -481,7 +481,7 @@ void WrapWidget::addProfileCallsButton() {
 	const auto peer = key().peer();
 	const auto user = peer ? peer->asUser() : nullptr;
 	if (!user
-		|| user->isSelf()
+		|| user->sharedMediaInfo()
 		|| !user->session().serverConfig().phoneCallsEnabled.current()) {
 		return;
 	}
@@ -575,12 +575,13 @@ void WrapWidget::showTopBarMenu() {
 		return _topBarMenu->addAction(text, std::move(callback));
 	};
 	if (const auto peer = key().peer()) {
-		Window::FillPeerMenu(
+		Window::FillDialogsEntryMenu(
 			_controller->parentController(),
-			peer,
-			FilterId(),
-			addAction,
-			Window::PeerMenuSource::Profile);
+			Dialogs::EntryState{
+				.key = peer->owner().history(peer),
+				.section = Dialogs::EntryState::Section::Profile,
+			},
+			addAction);
 	//} else if (const auto feed = key().feed()) { // #feed
 	//	Window::FillFeedMenu(
 	//		_controller->parentController(),

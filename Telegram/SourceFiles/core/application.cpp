@@ -24,6 +24,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "chat_helpers/emoji_keywords.h"
 #include "chat_helpers/stickers_emoji_image_loader.h"
 #include "base/platform/base_platform_info.h"
+#include "base/platform/base_platform_last_input.h"
 #include "platform/platform_specific.h"
 #include "mainwindow.h"
 #include "dialogs/dialogs_entry.h"
@@ -35,6 +36,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_translator.h"
 #include "lang/lang_cloud_manager.h"
 #include "lang/lang_hardcoded.h"
+#include "lang/lang_instance.h"
 #include "mainwidget.h"
 #include "core/file_utilities.h"
 #include "main/main_account.h"
@@ -55,7 +57,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_location_manager.h"
 #include "ui/widgets/tooltip.h"
 #include "ui/image/image.h"
-#include "ui/text_options.h"
+#include "ui/text/text_options.h"
 #include "ui/emoji_config.h"
 #include "ui/effects/animations.h"
 #include "storage/serialize_common.h"
@@ -77,7 +79,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtWidgets/QDesktopWidget>
 #include <QtCore/QMimeDatabase>
 #include <QtGui/QGuiApplication>
-#include <QtGui/QDesktopServices>
+#include <QtGui/QScreen>
 
 namespace Core {
 namespace {
@@ -806,7 +808,7 @@ void Application::updateNonIdle() {
 
 crl::time Application::lastNonIdleTime() const {
 	return std::max(
-		Platform::LastUserInputTime().value_or(0),
+		base::Platform::LastUserInputTime().value_or(0),
 		_lastNonIdleTime);
 }
 
@@ -940,7 +942,7 @@ QPoint Application::getPointForCallPanelCenter() const {
 	if (const auto window = activeWindow()) {
 		return window->getPointForCallPanelCenter();
 	}
-	return QApplication::desktop()->screenGeometry().center();
+	return QGuiApplication::primaryScreen()->geometry().center();
 }
 
 // macOS Qt bug workaround, sometimes no leaveEvent() gets to the nested widgets.

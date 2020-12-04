@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <rpl/combine.h>
 #include <rpl/combine_previous.h>
 #include "history/history.h"
+#include "history/view/history_view_send_action.h"
 #include "boxes/add_contact_box.h"
 #include "boxes/confirm_box.h"
 #include "info/info_memento.h"
@@ -45,7 +46,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "facades.h"
 #include "styles/style_window.h"
 #include "styles/style_dialogs.h"
-#include "styles/style_history.h"
+#include "styles/style_chat.h"
 #include "styles/style_info.h"
 
 namespace HistoryView {
@@ -66,8 +67,12 @@ TopBarWidget::TopBarWidget(
 , _menuToggle(this, st::topBarMenuToggle)
 , _titlePeerText(st::windowMinWidth / 3)
 , _onlineUpdater([=] { updateOnlineDisplay(); }) {
-	subscribe(Lang::Current().updated(), [=] { refreshLang(); });
 	setAttribute(Qt::WA_OpaquePaintEvent);
+
+	Lang::Updated(
+	) | rpl::start_with_next([=] {
+		refreshLang();
+	}, lifetime());
 
 	_forward->setClickedCallback([=] { _forwardSelection.fire({}); });
 	_forward->setWidthChangedCallback([=] { updateControlsGeometry(); });
@@ -110,7 +115,7 @@ TopBarWidget::TopBarWidget(
 		using AnimationUpdate = Data::Session::SendActionAnimationUpdate;
 		session().data().sendActionAnimationUpdated(
 		) | rpl::filter([=](const AnimationUpdate &update) {
-			return (update.history == _activeChat.history());
+			return (update.history == _activeChat.key.history());
 		}) | rpl::start_with_next([=] {
 			update();
 		}, lifetime());
@@ -186,13 +191,13 @@ void TopBarWidget::refreshLang() {
 }
 
 void TopBarWidget::onSearch() {
-	if (_activeChat) {
-		_controller->content()->searchInChat(_activeChat);
+	if (_activeChat.key) {
+		_controller->content()->searchInChat(_activeChat.key);
 	}
 }
 
 void TopBarWidget::onCall() {
-	if (const auto peer = _activeChat.peer()) {
+	if (const auto peer = _activeChat.key.peer()) {
 		if (const auto user = peer->asUser()) {
 			Core::App().calls().startOutgoingCall(user, false);
 		}
@@ -200,7 +205,7 @@ void TopBarWidget::onCall() {
 }
 
 void TopBarWidget::showMenu() {
-	if (!_activeChat || _menu) {
+	if (!_activeChat.key || _menu) {
 		return;
 	}
 	_menu.create(parentWidget());
@@ -223,28 +228,14 @@ void TopBarWidget::showMenu() {
 	}));
 	_menuToggle->installEventFilter(_menu);
 	const auto addAction = [&](
-		const QString & text,
+		const QString &text,
 		Fn<void()> callback) {
 		return _menu->addAction(text, std::move(callback));
 	};
-	if (const auto peer = _activeChat.peer()) {
-		Window::FillPeerMenu(
-			_controller,
-			peer,
-			FilterId(),
-			addAction,
-			(_section == Section::Scheduled)
-				? Window::PeerMenuSource::ScheduledSection
-				: Window::PeerMenuSource::History);
-	} else if (const auto folder = _activeChat.folder()) {
-		Window::FillFolderMenu(
-			_controller,
-			folder,
-			addAction,
-			Window::PeerMenuSource::History);
-	} else {
-		Unexpected("Empty active chat in TopBarWidget::showMenu.");
-	}
+	Window::FillDialogsEntryMenu(
+		_controller,
+		_activeChat,
+		addAction);
 	if (_menu->actions().empty()) {
 		_menu.destroy();
 	} else {
@@ -258,13 +249,13 @@ void TopBarWidget::toggleInfoSection() {
 		&& (Core::App().settings().thirdSectionInfoEnabled()
 			|| Core::App().settings().tabbedReplacedWithInfo())) {
 		_controller->closeThirdSection();
-	} else if (_activeChat.peer()) {
+	} else if (_activeChat.key.peer()) {
 		if (_controller->canShowThirdSection()) {
 			Core::App().settings().setThirdSectionInfoEnabled(true);
 			Core::App().saveSettingsDelayed();
 			if (Adaptive::ThreeColumn()) {
 				_controller->showSection(
-					Info::Memento::Default(_activeChat.peer()),
+					Info::Memento::Default(_activeChat.key.peer()),
 					Window::SectionShow().withThirdColumn());
 			} else {
 				_controller->resizeForThirdSection();
@@ -318,7 +309,7 @@ void TopBarWidget::paintEvent(QPaintEvent *e) {
 }
 
 void TopBarWidget::paintTopBar(Painter &p) {
-	if (!_activeChat) {
+	if (!_activeChat.key) {
 		return;
 	}
 	auto nameleft = _leftTaken;
@@ -326,19 +317,24 @@ void TopBarWidget::paintTopBar(Painter &p) {
 	auto statustop = st::topBarHeight - st::topBarArrowPadding.bottom() - st::dialogsTextFont->height;
 	auto availableWidth = width() - _rightTaken - nameleft;
 
-	const auto history = _activeChat.history();
-	const auto folder = _activeChat.folder();
+	const auto history = _activeChat.key.history();
+	const auto folder = _activeChat.key.folder();
 	if (folder
-		|| history->peer->isSelf()
-		|| (_section == Section::Scheduled)) {
+		|| history->peer->sharedMediaInfo()
+		|| (_activeChat.section == Section::Scheduled)
+		|| (_activeChat.section == Section::Pinned)) {
 		// #TODO feed name emoji.
-		auto text = (_section == Section::Scheduled)
+		auto text = (_activeChat.section == Section::Scheduled)
 			? ((history && history->peer->isSelf())
 				? tr::lng_reminder_messages(tr::now)
 				: tr::lng_scheduled_messages(tr::now))
+			: (_activeChat.section == Section::Pinned)
+			? _customTitleText
 			: folder
 			? folder->chatListName()
-			: tr::lng_saved_messages(tr::now);
+			: history->peer->isSelf()
+			? tr::lng_saved_messages(tr::now)
+			: tr::lng_replies_messages(tr::now);
 		const auto textWidth = st::historySavedFont->width(text);
 		if (availableWidth < textWidth) {
 			text = st::historySavedFont->elided(text, availableWidth);
@@ -350,7 +346,29 @@ void TopBarWidget::paintTopBar(Painter &p) {
 			(height() - st::historySavedFont->height) / 2,
 			width(),
 			text);
-	} else if (const auto history = _activeChat.history()) {
+	} else if (_activeChat.section == Section::Replies) {
+		p.setPen(st::dialogsNameFg);
+		p.setFont(st::semiboldFont);
+		p.drawTextLeft(
+			nameleft,
+			nametop,
+			width(),
+			tr::lng_manage_discussion_group(tr::now));
+
+		p.setFont(st::dialogsTextFont);
+		if (!paintConnectingState(p, nameleft, statustop, width())
+			&& !_sendAction->paint(
+				p,
+				nameleft,
+				statustop,
+				availableWidth,
+				width(),
+				st::historyStatusFgTyping,
+				crl::now())) {
+			p.setPen(st::historyStatusFg);
+			p.drawTextLeft(nameleft, statustop, width(), _customTitleText);
+		}
+	} else if (const auto history = _activeChat.key.history()) {
 		const auto peer = history->peer;
 		const auto &text = peer->topBarNameText();
 		const auto badgeStyle = Ui::PeerBadgeStyle{
@@ -377,18 +395,15 @@ void TopBarWidget::paintTopBar(Painter &p) {
 			namewidth);
 
 		p.setFont(st::dialogsTextFont);
-		if (paintConnectingState(p, nameleft, statustop, width())) {
-			return;
-		} else if (history->paintSendAction(
+		if (!paintConnectingState(p, nameleft, statustop, width())
+			&& !_sendAction->paint(
 				p,
 				nameleft,
 				statustop,
-			availableWidth,
+				availableWidth,
 				width(),
 				st::historyStatusFgTyping,
 				crl::now())) {
-			return;
-		} else {
 			paintStatus(p, nameleft, statustop, availableWidth, width());
 		}
 	}
@@ -452,37 +467,46 @@ void TopBarWidget::mousePressEvent(QMouseEvent *e) {
 }
 
 void TopBarWidget::infoClicked() {
-	if (!_activeChat) {
+	const auto key = _activeChat.key;
+	if (!key) {
 		return;
-	} else if (_activeChat.folder()) {
+	} else if (key.folder()) {
 		_controller->closeFolder();
 	//} else if (const auto feed = _activeChat.feed()) { // #feed
 	//	_controller->showSection(Info::Memento(
 	//		feed,
 	//		Info::Section(Info::Section::Type::Profile)));
-	} else if (_activeChat.peer()->isSelf()) {
+	} else if (key.peer()->isSelf()) {
 		_controller->showSection(Info::Memento(
-			_activeChat.peer(),
+			key.peer(),
+			Info::Section(Storage::SharedMediaType::Photo)));
+	} else if (key.peer()->isRepliesChat()) {
+		_controller->showSection(Info::Memento(
+			key.peer(),
 			Info::Section(Storage::SharedMediaType::Photo)));
 	} else {
-		_controller->showPeerInfo(_activeChat.peer());
+		_controller->showPeerInfo(key.peer());
 	}
 }
 
 void TopBarWidget::backClicked() {
-	if (_activeChat.folder()) {
+	if (_activeChat.key.folder()) {
 		_controller->closeFolder();
 	} else {
 		_controller->showBackFromStack();
 	}
 }
 
-void TopBarWidget::setActiveChat(Dialogs::Key chat, Section section) {
-	if (_activeChat == chat && _section == section) {
+void TopBarWidget::setActiveChat(
+		ActiveChat activeChat,
+		SendActionPainter *sendAction) {
+	if (_activeChat.key == activeChat.key
+		&& _activeChat.section == activeChat.section) {
+		_activeChat = activeChat;
 		return;
 	}
-	_activeChat = chat;
-	_section = section;
+	_activeChat = activeChat;
+	_sendAction = sendAction;
 	_back->clearState();
 	update();
 
@@ -497,8 +521,15 @@ void TopBarWidget::setActiveChat(Dialogs::Key chat, Section section) {
 	refreshUnreadBadge();
 }
 
+void TopBarWidget::setCustomTitle(const QString &title) {
+	if (_customTitleText != title) {
+		_customTitleText = title;
+		update();
+	}
+}
+
 void TopBarWidget::refreshInfoButton() {
-	if (const auto peer = _activeChat.peer()) {
+	if (const auto peer = _activeChat.key.peer()) {
 		auto info = object_ptr<Ui::UserpicButton>(
 			this,
 			_controller,
@@ -531,14 +562,14 @@ int TopBarWidget::countSelectedButtonsTop(float64 selectedShown) {
 }
 
 void TopBarWidget::updateSearchVisibility() {
-	const auto historyMode = (_section == Section::History);
-	const auto smallDialogsColumn = _activeChat.folder()
+	const auto historyMode = (_activeChat.section == Section::History);
+	const auto smallDialogsColumn = _activeChat.key.folder()
 		&& (width() < _back->width() + _search->width());
 	_search->setVisible(historyMode && !smallDialogsColumn);
 }
 
 void TopBarWidget::updateControlsGeometry() {
-	if (!_activeChat) {
+	if (!_activeChat.key) {
 		return;
 	}
 	auto hasSelected = (_selectedCount > 0);
@@ -575,7 +606,7 @@ void TopBarWidget::updateControlsGeometry() {
 	if (_back->isHidden()) {
 		_leftTaken = st::topBarArrowPadding.right();
 	} else {
-		const auto smallDialogsColumn = _activeChat.folder()
+		const auto smallDialogsColumn = _activeChat.key.folder()
 			&& (width() < _back->width() + _search->width());
 		_leftTaken = smallDialogsColumn ? (width() - _back->width()) / 2 : 0;
 		_back->moveToLeft(_leftTaken, otherButtonsTop);
@@ -620,7 +651,7 @@ void TopBarWidget::setAnimatingMode(bool enabled) {
 }
 
 void TopBarWidget::updateControlsVisibility() {
-	if (!_activeChat) {
+	if (!_activeChat.key) {
 		return;
 	} else if (_animatingMode) {
 		hideChildren();
@@ -633,7 +664,7 @@ void TopBarWidget::updateControlsVisibility() {
 
 	auto backVisible = Adaptive::OneColumn()
 		|| !_controller->content()->stackIsEmpty()
-		|| _activeChat.folder();
+		|| _activeChat.key.folder();
 	_back->setVisible(backVisible);
 	if (_info) {
 		_info->setVisible(Adaptive::OneColumn());
@@ -641,19 +672,22 @@ void TopBarWidget::updateControlsVisibility() {
 	if (_unreadBadge) {
 		_unreadBadge->show();
 	}
-	const auto historyMode = (_section == Section::History);
-	const auto scheduledMode = (_section == Section::Scheduled);
-	const auto showInScheduledMode = (_activeChat.peer()
-		&& _activeChat.peer()->canSendPolls());
+	const auto section = _activeChat.section;
+	const auto historyMode = (section == Section::History);
+	const auto hasPollsMenu = _activeChat.key.peer()
+		&& _activeChat.key.peer()->canSendPolls();
+	const auto hasMenu = !_activeChat.key.folder()
+		&& ((section == Section::Scheduled || section == Section::Replies)
+			? hasPollsMenu
+			: historyMode);
 	updateSearchVisibility();
-	_menuToggle->setVisible(!_activeChat.folder()
-		&& (scheduledMode ? showInScheduledMode : historyMode));
+	_menuToggle->setVisible(hasMenu);
 	_infoToggle->setVisible(historyMode
-		&& !_activeChat.folder()
+		&& !_activeChat.key.folder()
 		&& !Adaptive::OneColumn()
 		&& _controller->canShowThirdSection());
 	const auto callsEnabled = [&] {
-		if (const auto peer = _activeChat.peer()) {
+		if (const auto peer = _activeChat.key.peer()) {
 			if (const auto user = peer->asUser()) {
 				return session().serverConfig().phoneCallsEnabled.current()
 					&& user->hasCalls();
@@ -671,7 +705,7 @@ void TopBarWidget::updateControlsVisibility() {
 
 void TopBarWidget::updateMembersShowArea() {
 	const auto membersShowAreaNeeded = [&] {
-		const auto peer = _activeChat.peer();
+		const auto peer = _activeChat.key.peer();
 		if ((_selectedCount > 0) || !peer) {
 			return false;
 		} else if (const auto chat = peer->asChat()) {
@@ -757,7 +791,7 @@ void TopBarWidget::updateAdaptiveLayout() {
 }
 
 void TopBarWidget::refreshUnreadBadge() {
-	if (!Adaptive::OneColumn() && !_activeChat.folder()) {
+	if (!Adaptive::OneColumn() && !_activeChat.key.folder()) {
 		_unreadBadge.destroy();
 		return;
 	} else if (_unreadBadge) {
@@ -786,8 +820,9 @@ void TopBarWidget::refreshUnreadBadge() {
 void TopBarWidget::updateUnreadBadge() {
 	if (!_unreadBadge) return;
 
-	const auto muted = session().data().unreadBadgeMutedIgnoreOne(_activeChat);
-	const auto counter = session().data().unreadBadgeIgnoreOne(_activeChat);
+	const auto key = _activeChat.key;
+	const auto muted = session().data().unreadBadgeMutedIgnoreOne(key);
+	const auto counter = session().data().unreadBadgeIgnoreOne(key);
 	const auto text = [&] {
 		if (!counter) {
 			return QString();
@@ -814,12 +849,15 @@ void TopBarWidget::updateInfoToggleActive() {
 }
 
 void TopBarWidget::updateOnlineDisplay() {
-	if (!_activeChat.peer()) return;
+	const auto peer = _activeChat.key.peer();
+	if (!peer) {
+		return;
+	}
 
 	QString text;
 	const auto now = base::unixtime::now();
 	bool titlePeerTextOnline = false;
-	if (const auto user = _activeChat.peer()->asUser()) {
+	if (const auto user = peer->asUser()) {
 		if (session().supportMode()
 			&& !session().supportHelper().infoCurrent(user).text.empty()) {
 			text = QString::fromUtf8("\xe2\x9a\xa0\xef\xb8\x8f check info");
@@ -828,7 +866,7 @@ void TopBarWidget::updateOnlineDisplay() {
 			text = Data::OnlineText(user, now);
 			titlePeerTextOnline = Data::OnlineTextActive(user, now);
 		}
-	} else if (const auto chat = _activeChat.peer()->asChat()) {
+	} else if (const auto chat = peer->asChat()) {
 		if (!chat->amIn()) {
 			text = tr::lng_chat_status_unaccessible(tr::now);
 		} else if (chat->participants.empty()) {
@@ -859,7 +897,7 @@ void TopBarWidget::updateOnlineDisplay() {
 				text = tr::lng_group_status(tr::now);
 			}
 		}
-	} else if (const auto channel = _activeChat.peer()->asChannel()) {
+	} else if (const auto channel = peer->asChannel()) {
 		if (channel->isMegagroup()
 			&& (channel->membersCount() > 0)
 			&& (channel->membersCount()
@@ -906,7 +944,10 @@ void TopBarWidget::updateOnlineDisplay() {
 }
 
 void TopBarWidget::updateOnlineDisplayTimer() {
-	if (!_activeChat.peer()) return;
+	const auto peer = _activeChat.key.peer();
+	if (!peer) {
+		return;
+	}
 
 	const auto now = base::unixtime::now();
 	auto minTimeout = crl::time(86400);
@@ -914,13 +955,13 @@ void TopBarWidget::updateOnlineDisplayTimer() {
 		auto hisTimeout = Data::OnlineChangeTimeout(user, now);
 		accumulate_min(minTimeout, hisTimeout);
 	};
-	if (const auto user = _activeChat.peer()->asUser()) {
+	if (const auto user = peer->asUser()) {
 		handleUser(user);
-	} else if (auto chat = _activeChat.peer()->asChat()) {
+	} else if (const auto chat = peer->asChat()) {
 		for (const auto user : chat->participants) {
 			handleUser(user);
 		}
-	} else if (_activeChat.peer()->isChannel()) {
+	} else if (peer->isChannel()) {
 	}
 	updateOnlineDisplayIn(minTimeout);
 }

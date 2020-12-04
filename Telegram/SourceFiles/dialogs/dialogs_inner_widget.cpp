@@ -19,7 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/text/text_utilities.h"
-#include "ui/text_options.h"
+#include "ui/text/text_options.h"
 #include "ui/ui_utility.h"
 #include "data/data_drafts.h"
 #include "data/data_folder.h"
@@ -380,7 +380,7 @@ int InnerWidget::searchedOffset() const {
 
 int InnerWidget::searchInChatSkip() const {
 	auto result = st::searchedBarHeight + st::dialogsSearchInHeight;
-	if (_searchFromUser) {
+	if (_searchFromPeer) {
 		result += st::lineWidth + st::dialogsSearchInHeight;
 	}
 	return result;
@@ -811,7 +811,7 @@ void InnerWidget::paintSearchInChat(Painter &p) const {
 
 	auto fullRect = QRect(0, top, width(), height - top);
 	p.fillRect(fullRect, st::dialogsBg);
-	if (_searchFromUser) {
+	if (_searchFromPeer) {
 		p.fillRect(QRect(0, top + st::dialogsSearchInHeight, width(), st::lineWidth), st::shadowFg);
 	}
 
@@ -819,6 +819,8 @@ void InnerWidget::paintSearchInChat(Painter &p) const {
 	if (const auto peer = _searchInChat.peer()) {
 		if (peer->isSelf()) {
 			paintSearchInSaved(p, top, _searchInChatText);
+		} else if (peer->isRepliesChat()) {
+			paintSearchInReplies(p, top, _searchInChatText);
 		} else {
 			paintSearchInPeer(p, peer, _searchInChatUserpic, top, _searchInChatText);
 		}
@@ -827,7 +829,7 @@ void InnerWidget::paintSearchInChat(Painter &p) const {
 	} else {
 		Unexpected("Empty Key in paintSearchInChat.");
 	}
-	if (const auto from = _searchFromUser) {
+	if (const auto from = _searchFromPeer) {
 		top += st::dialogsSearchInHeight + st::lineWidth;
 		p.setPen(st::dialogsTextFg);
 		p.setTextPalette(st::dialogsSearchFromPalette);
@@ -892,6 +894,16 @@ void InnerWidget::paintSearchInSaved(
 		const Ui::Text::String &text) const {
 	const auto paintUserpic = [&](Painter &p, int x, int y, int size) {
 		Ui::EmptyUserpic::PaintSavedMessages(p, x, y, width(), size);
+	};
+	paintSearchInFilter(p, paintUserpic, top, nullptr, text);
+}
+
+void InnerWidget::paintSearchInReplies(
+		Painter &p,
+		int top,
+		const Ui::Text::String &text) const {
+	const auto paintUserpic = [&](Painter &p, int x, int y, int size) {
+		Ui::EmptyUserpic::PaintRepliesMessages(p, x, y, width(), size);
 	};
 	paintSearchInFilter(p, paintUserpic, top, nullptr, text);
 }
@@ -1802,23 +1814,17 @@ void InnerWidget::contextMenuEvent(QContextMenuEvent *e) {
 		} else {
 			fillArchiveSearchMenu(_menu.get());
 		}
-	} else if (const auto history = row.key.history()) {
-		Window::FillPeerMenu(
+	} else {
+		Window::FillDialogsEntryMenu(
 			_controller,
-			history->peer,
-			_filterId,
+			Dialogs::EntryState{
+				.key = row.key,
+				.section = Dialogs::EntryState::Section::ChatsList,
+				.filterId = _filterId,
+			},
 			[&](const QString &text, Fn<void()> callback) {
 				return _menu->addAction(text, std::move(callback));
-			},
-			Window::PeerMenuSource::ChatsList);
-	} else if (const auto folder = row.key.folder()) {
-		Window::FillFolderMenu(
-			_controller,
-			folder,
-			[&](const QString &text, Fn<void()> callback) {
-				return _menu->addAction(text, std::move(callback));
-			},
-			Window::PeerMenuSource::ChatsList);
+			});
 	}
 	connect(_menu.get(), &QObject::destroyed, [=] {
 		if (_menuRow.key) {
@@ -1856,7 +1862,7 @@ void InnerWidget::applyFilterUpdate(QString newFilter, bool force) {
 	newFilter = words.isEmpty() ? QString() : words.join(' ');
 	if (newFilter != _filter || force) {
 		_filter = newFilter;
-		if (_filter.isEmpty() && !_searchFromUser) {
+		if (_filter.isEmpty() && !_searchFromPeer) {
 			clearFilter();
 		} else {
 			_state = WidgetState::Filtered;
@@ -2316,7 +2322,7 @@ bool InnerWidget::hasFilteredResults() const {
 	return !_filterResults.empty() && _hashtagResults.empty();
 }
 
-void InnerWidget::searchInChat(Key key, UserData *from) {
+void InnerWidget::searchInChat(Key key, PeerData *from) {
 	_searchInMigrated = nullptr;
 	if (const auto peer = key.peer()) {
 		if (const auto migrateTo = peer->migrateTo()) {
@@ -2326,7 +2332,7 @@ void InnerWidget::searchInChat(Key key, UserData *from) {
 		}
 	}
 	_searchInChat = key;
-	_searchFromUser = from;
+	_searchFromPeer = from;
 	if (_searchInChat) {
 		_controller->closeFolder();
 		onHashtagFilterUpdate(QStringRef());
@@ -2335,9 +2341,9 @@ void InnerWidget::searchInChat(Key key, UserData *from) {
 	} else {
 		_cancelSearchInChat->hide();
 	}
-	if (_searchFromUser) {
+	if (_searchFromPeer) {
 		_cancelSearchFromUser->show();
-		_searchFromUserUserpic = _searchFromUser->createUserpicView();
+		_searchFromUserUserpic = _searchFromPeer->createUserpicView();
 	} else {
 		_cancelSearchFromUser->hide();
 		_searchFromUserUserpic = nullptr;
@@ -2359,6 +2365,8 @@ void InnerWidget::refreshSearchInChatLabel() {
 		if (const auto peer = _searchInChat.peer()) {
 			if (peer->isSelf()) {
 				return tr::lng_saved_messages(tr::now);
+			} else if (peer->isRepliesChat()) {
+				return tr::lng_replies_messages(tr::now);
 			}
 			return peer->name;
 		//} else if (const auto feed = _searchInChat.feed()) { // #feed
@@ -2372,7 +2380,7 @@ void InnerWidget::refreshSearchInChatLabel() {
 			dialog,
 			Ui::DialogTextOptions());
 	}
-	const auto from = _searchFromUser ? _searchFromUser->name : QString();
+	const auto from = _searchFromPeer ? _searchFromPeer->name : QString();
 	if (!from.isEmpty()) {
 		const auto fromUserText = tr::lng_dlg_search_from(
 			tr::now,
@@ -3150,6 +3158,23 @@ void InnerWidget::setupShortcuts() {
 
 		request->check(Command::FolderPrevious) && request->handle([=] {
 			return nearFolder(false);
+		});
+
+		request->check(Command::ReadChat) && request->handle([=] {
+			const auto history = _selected ? _selected->history() : nullptr;
+			if (history) {
+				if ((history->chatListUnreadCount() > 0)
+					|| history->chatListUnreadMark()) {
+					session().data().histories().readInbox(history);
+				}
+				return true;
+			}
+			return (history != nullptr);
+		});
+
+		request->check(Command::ShowContacts) && request->handle([=] {
+			Ui::show(PrepareContactsBox(_controller));
+			return true;
 		});
 
 		if (session().supportMode() && row.key.history()) {

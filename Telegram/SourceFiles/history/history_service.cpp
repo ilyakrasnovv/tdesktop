@@ -28,7 +28,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/notifications_manager.h"
 #include "window/window_session_controller.h"
 #include "storage/storage_shared_media.h"
-#include "ui/text_options.h"
+#include "ui/text/format_values.h"
+#include "ui/text/text_options.h"
 
 namespace {
 
@@ -218,6 +219,61 @@ void HistoryService::setMessageByAction(const MTPmessageAction &action) {
 		return result;
 	};
 
+	auto prepareProximityReached = [this](const MTPDmessageActionGeoProximityReached &action) {
+		auto result = PreparedText{};
+		const auto fromId = peerFromMTP(action.vfrom_id());
+		const auto fromPeer = history()->owner().peer(fromId);
+		const auto toId = peerFromMTP(action.vto_id());
+		const auto toPeer = history()->owner().peer(toId);
+		const auto selfId = _from->session().userPeerId();
+		const auto distanceMeters = action.vdistance().v;
+		const auto distance = [&] {
+			if (distanceMeters >= 1000) {
+				const auto km = (10 * (distanceMeters / 10)) / 1000.;
+				return tr::lng_action_proximity_distance_km(
+					tr::now,
+					lt_count,
+					km);
+			} else {
+				return tr::lng_action_proximity_distance_m(
+					tr::now,
+					lt_count,
+					distanceMeters);
+			}
+		}();
+		result.text = [&] {
+			if (fromId == selfId) {
+				result.links.push_back(toPeer->createOpenLink());
+				return tr::lng_action_you_proximity_reached(
+					tr::now,
+					lt_distance,
+					distance,
+					lt_user,
+					textcmdLink(1, toPeer->name));
+			} else if (toId == selfId) {
+				result.links.push_back(fromPeer->createOpenLink());
+				return tr::lng_action_proximity_reached_you(
+					tr::now,
+					lt_from,
+					textcmdLink(1, fromPeer->name),
+					lt_distance,
+					distance);
+			} else {
+				result.links.push_back(fromPeer->createOpenLink());
+				result.links.push_back(toPeer->createOpenLink());
+				return tr::lng_action_proximity_reached(
+					tr::now,
+					lt_from,
+					textcmdLink(1, fromPeer->name),
+					lt_distance,
+					distance,
+					lt_user,
+					textcmdLink(2, toPeer->name));
+			}
+		}();
+		return result;
+	};
+
 	const auto messageText = action.match([&](
 		const MTPDmessageActionChatAddUser &data) {
 		return prepareChatAddUserText(data);
@@ -259,6 +315,8 @@ void HistoryService::setMessageByAction(const MTPmessageAction &action) {
 		return prepareSecureValuesSent(data);
 	}, [&](const MTPDmessageActionContactSignUp &data) {
 		return prepareContactSignUp();
+	}, [&](const MTPDmessageActionGeoProximityReached &data) {
+		return prepareProximityReached(data);
 	}, [](const MTPDmessageActionPaymentSentMe &) {
 		LOG(("API Error: messageActionPaymentSentMe received."));
 		return PreparedText{ tr::lng_message_empty(tr::now) };
@@ -366,8 +424,15 @@ HistoryService::PreparedText HistoryService::preparePinnedText() {
 	auto pinned = Get<HistoryServicePinned>();
 	if (pinned && pinned->msg) {
 		const auto mediaText = [&] {
+			using TTL = HistoryServiceSelfDestruct;
 			if (const auto media = pinned->msg->media()) {
 				return media->pinnedTextSubstring();
+			} else if (const auto selfdestruct = pinned->msg->Get<TTL>()) {
+				if (selfdestruct->type == TTL::Type::Photo) {
+					return tr::lng_action_pinned_media_photo(tr::now);
+				} else if (selfdestruct->type == TTL::Type::Video) {
+					return tr::lng_action_pinned_media_video(tr::now);
+				}
 			}
 			return QString();
 		}();
@@ -508,7 +573,7 @@ HistoryService::HistoryService(
 		data.vflags().v,
 		clientFlags,
 		data.vdate().v,
-		data.vfrom_id().value_or_empty()) {
+		data.vfrom_id() ? peerFromMTP(*data.vfrom_id()) : PeerId(0)) {
 	createFromMtp(data);
 }
 
@@ -522,7 +587,7 @@ HistoryService::HistoryService(
 		mtpCastFlags(data.vflags().v),
 		clientFlags,
 		data.vdate().v,
-		data.vfrom_id().value_or_empty()) {
+		data.vfrom_id() ? peerFromMTP(*data.vfrom_id()) : PeerId(0)) {
 	createFromMtp(data);
 }
 
@@ -533,7 +598,7 @@ HistoryService::HistoryService(
 	TimeId date,
 	const PreparedText &message,
 	MTPDmessage::Flags flags,
-	UserId from,
+	PeerId from,
 	PhotoData *photo)
 : HistoryItem(history, id, flags, clientFlags, date, from) {
 	setServiceText(message);
@@ -550,6 +615,11 @@ bool HistoryService::updateDependencyItem() {
 		return updateDependent(true);
 	}
 	return HistoryItem::updateDependencyItem();
+}
+
+bool HistoryService::needCheck() const {
+	return (GetDependentData() != nullptr)
+		|| Has<HistoryServiceSelfDestruct>();
 }
 
 QString HistoryService::inDialogsText(DrawInDialog way) const {
@@ -678,21 +748,28 @@ void HistoryService::createFromMtp(const MTPDmessageService &message) {
 		UpdateComponents(HistoryServicePayment::Bit());
 		auto amount = message.vaction().c_messageActionPaymentSent().vtotal_amount().v;
 		auto currency = qs(message.vaction().c_messageActionPaymentSent().vcurrency());
-		Get<HistoryServicePayment>()->amount = HistoryView::FillAmountAndCurrency(amount, currency);
+		Get<HistoryServicePayment>()->amount = Ui::FillAmountAndCurrency(amount, currency);
 	}
-	if (const auto replyToMsgId = message.vreply_to_msg_id()) {
-		if (message.vaction().type() == mtpc_messageActionPinMessage) {
-			UpdateComponents(HistoryServicePinned::Bit());
-		}
-		if (const auto dependent = GetDependentData()) {
-			dependent->msgId = replyToMsgId->v;
-			if (!updateDependent()) {
-				history()->session().api().requestMessageData(
-					history()->peer->asChannel(),
-					dependent->msgId,
-					HistoryDependentItemCallback(this));
+	if (const auto replyTo = message.vreply_to()) {
+		replyTo->match([&](const MTPDmessageReplyHeader &data) {
+			const auto peer = data.vreply_to_peer_id()
+				? peerFromMTP(*data.vreply_to_peer_id())
+				: history()->peer->id;
+			if (!peer || peer == history()->peer->id) {
+				if (message.vaction().type() == mtpc_messageActionPinMessage) {
+					UpdateComponents(HistoryServicePinned::Bit());
+				}
+				if (const auto dependent = GetDependentData()) {
+					dependent->msgId = data.vreply_to_msg_id().v;
+					if (!updateDependent()) {
+						history()->session().api().requestMessageData(
+							history()->peer->asChannel(),
+							dependent->msgId,
+							HistoryDependentItemCallback(this));
+					}
+				}
 			}
-		}
+		});
 	}
 	setMessageByAction(message.vaction());
 }
@@ -741,8 +818,9 @@ void HistoryService::updateDependentText() {
 
 	setServiceText(text);
 	history()->owner().requestItemResize(this);
-	if (history()->textCachedFor == this) {
-		history()->textCachedFor = nullptr;
+	const auto inDialogsHistory = history()->migrateToOrMe();
+	if (inDialogsHistory->textCachedFor == this) {
+		inDialogsHistory->textCachedFor = nullptr;
 	}
 	//if (const auto feed = history()->peer->feed()) { // #TODO archive
 	//	if (feed->textCachedFor == this) {

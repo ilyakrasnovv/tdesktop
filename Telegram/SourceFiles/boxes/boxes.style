@@ -348,6 +348,7 @@ sessionInfoFont: msgFont;
 sessionInfoFg: windowSubTextFg;
 sessionTerminateTop: 28px;
 sessionTerminateSkip: 22px;
+sessionNamePadding: margins(0px, 0px, 5px, 0px);
 sessionTerminate: IconButton {
 	width: 20px;
 	height: 20px;
@@ -365,6 +366,15 @@ sessionTerminate: IconButton {
 sessionTerminateAllButton: LinkButton(boxLinkButton) {
 	color: attentionButtonFg;
 	overColor: attentionButtonFg;
+}
+sessionNameStyle: TextStyle(defaultTextStyle) {
+	font: sessionNameFont;
+}
+sessionWhenStyle: TextStyle(defaultTextStyle) {
+	font: sessionWhenFont;
+}
+sessionInfoStyle: TextStyle(defaultTextStyle) {
+	font: sessionInfoFont;
 }
 
 passcodeHeaderFont: font(19px);
@@ -436,7 +446,7 @@ autoDownloadLimitPadding: margins(22px, 8px, 22px, 8px);
 
 confirmCaptionArea: InputField(defaultInputField) {
 	textMargins: margins(1px, 26px, 31px, 4px);
-	heightMax: 78px;
+	heightMax: 158px;
 }
 confirmBg: windowBgOver;
 confirmMaxHeight: 245px;
@@ -479,7 +489,7 @@ backgroundScroll: ScrollArea(boxScroll) {
 	deltab: 10px;
 }
 
-editMediaButtonSize: 29px;
+editMediaButtonSize: 28px;
 editMediaButtonSkip: 8px;
 editMediaButtonFileSkipRight: 1px;
 editMediaButtonFileSkipTop: 7px;
@@ -498,24 +508,32 @@ editMediaButton: IconButton {
 
 // SendFilesBox
 
-sendBoxAlbumGroupEditInternalSkip: 9px;
+sendBoxAlbumGroupEditInternalSkip: 8px;
 sendBoxAlbumGroupSkipRight: 6px;
 sendBoxAlbumGroupSkipTop: 6px;
-sendBoxAlbumGroupRadius: 12px;
-sendBoxAlbumGroupHeight: 25px;
+sendBoxAlbumGroupRadius: 13px;
+sendBoxAlbumGroupHeight: 26px;
 
-sendBoxAlbumGroupEditButtonIcon: editMediaButtonIconPhoto;
-sendBoxAlbumGroupEditButtonIconPosition: point(4px, -1px);
+sendBoxFileGroupSkipTop: 2px;
+sendBoxFileGroupSkipRight: 8px;
+sendBoxFileGroupEditInternalSkip: -1px;
 
 sendBoxAlbumGroupButtonFile: IconButton(editMediaButton) {
 	ripple: RippleAnimation(defaultRippleAnimation) {
 		color: windowBgRipple;
 	}
 }
-
-sendBoxAlbumGroupDeleteButtonIconPosition: point(-3px, 0px);
-sendBoxAlbumGroupDeleteButtonIcon: icon {{ "history_file_cancel", msgServiceFg}};
+sendBoxAlbumGroupEditButtonIconFile: editMediaButtonIconFile;
 sendBoxAlbumGroupDeleteButtonIconFile: icon {{ "history_file_cancel", menuIconFg, point(6px, 6px) }};
+
+sendBoxAlbumGroupButtonMediaEdit: icon {{ "settings_edit", msgServiceFg, point(3px, -2px) }};
+sendBoxAlbumGroupButtonMediaDelete: icon {{ "history_file_cancel", msgServiceFg, point(2px, 5px) }};
+sendBoxAlbumGroupButtonMedia: IconButton {
+	width: sendBoxAlbumGroupHeight;
+	height: sendBoxAlbumGroupHeight;
+
+	icon: sendBoxAlbumGroupButtonMediaEdit;
+}
 
 // End of SendFilesBox
 
@@ -695,11 +713,7 @@ groupStickersSubTitleHeight: 36px;
 
 sendMediaPreviewSize: 308px;
 sendMediaPreviewHeightMax: 1280;
-sendMediaPreviewPhotoSkip: 10px;
-sendMediaFileThumbSize: 64px;
-sendMediaFileThumbSkip: 10px;
-sendMediaFileNameTop: 7px;
-sendMediaFileStatusTop: 37px;
+sendMediaRowSkip: 10px;
 
 proxyUsePadding: margins(22px, 6px, 22px, 5px);
 proxyTryIPv6Padding: margins(22px, 8px, 22px, 5px);

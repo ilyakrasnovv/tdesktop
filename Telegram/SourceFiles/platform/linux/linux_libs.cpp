@@ -70,6 +70,7 @@ bool setupGtkBase(QLibrary &lib_gtk) {
 	if (!LOAD_SYMBOL(lib_gtk, "gtk_widget_realize", gtk_widget_realize)) return false;
 	if (!LOAD_SYMBOL(lib_gtk, "gtk_widget_hide_on_delete", gtk_widget_hide_on_delete)) return false;
 	if (!LOAD_SYMBOL(lib_gtk, "gtk_widget_destroy", gtk_widget_destroy)) return false;
+	if (!LOAD_SYMBOL(lib_gtk, "gtk_widget_get_type", gtk_widget_get_type)) return false;
 	if (!LOAD_SYMBOL(lib_gtk, "gtk_clipboard_get", gtk_clipboard_get)) return false;
 	if (!LOAD_SYMBOL(lib_gtk, "gtk_clipboard_store", gtk_clipboard_store)) return false;
 	if (!LOAD_SYMBOL(lib_gtk, "gtk_clipboard_wait_for_contents", gtk_clipboard_wait_for_contents)) return false;
@@ -115,7 +116,7 @@ bool setupGtkBase(QLibrary &lib_gtk) {
 		// Otherwise we get segfault in Ubuntu 17.04 in gtk_init_check() call.
 		// See https://github.com/telegramdesktop/tdesktop/issues/3176
 		// See https://github.com/telegramdesktop/tdesktop/issues/3162
-		if(Platform::IsWayland()) {
+		if(IsWayland()) {
 			DEBUG_LOG(("Limit allowed GDK backends to wayland,x11"));
 			gdk_set_allowed_backends("wayland,x11");
 		} else {
@@ -149,10 +150,16 @@ bool setupGtkBase(QLibrary &lib_gtk) {
 bool IconThemeShouldBeSet() {
 	// change the icon theme only if it isn't already set by a platformtheme plugin
 	// if QT_QPA_PLATFORMTHEME=(gtk2|gtk3), then force-apply the icon theme
-	static const auto Result = ((QIcon::themeName() == qstr("hicolor") // QGenericUnixTheme
-		&& QIcon::fallbackThemeName() == qstr("hicolor"))
-		|| (QIcon::themeName() == qstr("Adwaita") // QGnomeTheme
-		&& QIcon::fallbackThemeName() == qstr("gnome")))
+	static const auto Result =
+		// QGenericUnixTheme
+		(QIcon::themeName() == qstr("hicolor")
+			&& QIcon::fallbackThemeName() == qstr("hicolor"))
+		// QGnomeTheme
+		|| (QIcon::themeName() == qstr("Adwaita")
+			&& QIcon::fallbackThemeName() == qstr("gnome"))
+		// qt5ct
+		|| (QIcon::themeName().isEmpty()
+			&& QIcon::fallbackThemeName().isEmpty())
 		|| IsGtkIntegrationForced();
 
 	return Result;
@@ -163,13 +170,18 @@ void SetIconTheme() {
 		if (GtkSettingSupported()
 			&& GtkLoaded()
 			&& IconThemeShouldBeSet()) {
-			DEBUG_LOG(("Set GTK icon theme"));
+			DEBUG_LOG(("Setting GTK icon theme"));
 			QIcon::setThemeName(GtkSetting("gtk-icon-theme-name"));
 			QIcon::setFallbackThemeName(GtkSetting("gtk-fallback-icon-theme"));
-			Platform::SetApplicationIcon(Window::CreateIcon());
+
+			DEBUG_LOG(("New icon theme: %1").arg(QIcon::themeName()));
+			DEBUG_LOG(("New fallback icon theme: %1").arg(QIcon::fallbackThemeName()));
+
+			SetApplicationIcon(Window::CreateIcon());
 			if (App::wnd()) {
 				App::wnd()->setWindowIcon(Window::CreateIcon());
 			}
+
 			Core::App().domain().notifyUnreadBadgeChanged();
 		}
 	});
@@ -177,13 +189,13 @@ void SetIconTheme() {
 
 void DarkModeChanged() {
 	Core::Sandbox::Instance().customEnterFromEventLoop([] {
-		Core::App().settings().setSystemDarkMode(Platform::IsDarkMode());
+		Core::App().settings().setSystemDarkMode(IsDarkMode());
 	});
 }
 
 void DecorationLayoutChanged() {
 	Core::Sandbox::Instance().customEnterFromEventLoop([] {
-		Core::App().settings().setWindowControlsLayout(Platform::WindowControlsLayout());
+		Core::App().settings().setWindowControlsLayout(WindowControlsLayout());
 	});
 }
 #endif // !TDESKTOP_DISABLE_GTK_INTEGRATION
@@ -200,6 +212,7 @@ f_gtk_widget_get_window gtk_widget_get_window = nullptr;
 f_gtk_widget_realize gtk_widget_realize = nullptr;
 f_gtk_widget_hide_on_delete gtk_widget_hide_on_delete = nullptr;
 f_gtk_widget_destroy gtk_widget_destroy = nullptr;
+f_gtk_widget_get_type gtk_widget_get_type = nullptr;
 f_gtk_clipboard_get gtk_clipboard_get = nullptr;
 f_gtk_clipboard_store gtk_clipboard_store = nullptr;
 f_gtk_clipboard_wait_for_contents gtk_clipboard_wait_for_contents = nullptr;
@@ -235,6 +248,9 @@ f_gtk_image_set_from_pixbuf gtk_image_set_from_pixbuf = nullptr;
 f_gtk_dialog_get_widget_for_response gtk_dialog_get_widget_for_response = nullptr;
 f_gtk_button_set_label gtk_button_set_label = nullptr;
 f_gtk_button_get_type gtk_button_get_type = nullptr;
+f_gtk_app_chooser_dialog_new gtk_app_chooser_dialog_new = nullptr;
+f_gtk_app_chooser_get_app_info gtk_app_chooser_get_app_info = nullptr;
+f_gtk_app_chooser_get_type gtk_app_chooser_get_type = nullptr;
 f_gdk_set_allowed_backends gdk_set_allowed_backends = nullptr;
 f_gdk_window_set_modal_hint gdk_window_set_modal_hint = nullptr;
 f_gdk_window_focus gdk_window_focus = nullptr;
@@ -292,6 +308,10 @@ void start() {
 		LOAD_SYMBOL(lib_gtk, "gtk_dialog_get_widget_for_response", gtk_dialog_get_widget_for_response);
 		LOAD_SYMBOL(lib_gtk, "gtk_button_set_label", gtk_button_set_label);
 		LOAD_SYMBOL(lib_gtk, "gtk_button_get_type", gtk_button_get_type);
+
+		LOAD_SYMBOL(lib_gtk, "gtk_app_chooser_dialog_new", gtk_app_chooser_dialog_new);
+		LOAD_SYMBOL(lib_gtk, "gtk_app_chooser_get_app_info", gtk_app_chooser_get_app_info);
+		LOAD_SYMBOL(lib_gtk, "gtk_app_chooser_get_type", gtk_app_chooser_get_type);
 
 		SetIconTheme();
 

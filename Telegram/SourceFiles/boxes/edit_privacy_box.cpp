@@ -77,8 +77,12 @@ std::vector<not_null<PeerData*>> PrivacyExceptionsBoxController::getResult() con
 }
 
 void PrivacyExceptionsBoxController::rowClicked(not_null<PeerListRow*> row) {
+	const auto peer = row->peer();
+
+	// This call may delete row, if it was a search result row.
 	delegate()->peerListSetRowChecked(row, !row->checked());
-	if (const auto channel = row->peer()->asChannel()) {
+
+	if (const auto channel = peer->asChannel()) {
 		if (!channel->membersCountKnown()) {
 			channel->updateFull();
 		}
@@ -86,7 +90,7 @@ void PrivacyExceptionsBoxController::rowClicked(not_null<PeerListRow*> row) {
 }
 
 std::unique_ptr<PrivacyExceptionsBoxController::Row> PrivacyExceptionsBoxController::createRow(not_null<History*> history) {
-	if (history->peer->isSelf()) {
+	if (history->peer->isSelf() || history->peer->isRepliesChat()) {
 		return nullptr;
 	} else if (!history->peer->isUser()
 		&& !history->peer->isChat()

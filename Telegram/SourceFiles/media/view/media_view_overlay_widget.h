@@ -63,7 +63,6 @@ using OverlayParent = Ui::RpWidget;
 
 class OverlayWidget final
 	: public OverlayParent
-	, private base::Subscriber
 	, public ClickHandlerHost
 	, private PlaybackControls::Delegate {
 	Q_OBJECT
@@ -126,7 +125,8 @@ private slots:
 	void onCopy();
 	void onMenuDestroy(QObject *obj);
 	void receiveMouse();
-	void onAttachedStickers();
+	void onPhotoAttachedStickers();
+	void onDocumentAttachedStickers();
 
 	void onDropdown();
 
@@ -153,10 +153,16 @@ private:
 		OverVideo,
 	};
 	struct Entity {
-		base::optional_variant<
+		std::variant<
+			v::null_t,
 			not_null<PhotoData*>,
 			not_null<DocumentData*>> data;
 		HistoryItem *item;
+	};
+	enum class SavePhotoVideo {
+		None,
+		QuickSave,
+		SaveAs,
 	};
 
 	void paintEvent(QPaintEvent *e) override;
@@ -202,9 +208,16 @@ private:
 	void assignMediaPointer(not_null<PhotoData*> photo);
 
 	void updateOver(QPoint mpos);
-	void moveToScreen(bool force = false);
+	void moveToScreen();
 	bool moveToNext(int delta);
 	void preloadData(int delta);
+
+	void updateGeometry(const QRect &rect);
+	void handleVisibleChanged(bool visible);
+	void handleScreenChanged(QScreen *screen);
+
+	bool contentCanBeSaved() const;
+	void checkForSaveLoaded();
 
 	Entity entityForUserPhotos(int index) const;
 	Entity entityForSharedMedia(int index) const;
@@ -212,7 +225,8 @@ private:
 	Entity entityByIndex(int index) const;
 	Entity entityForItemId(const FullMsgId &itemId) const;
 	bool moveToEntity(const Entity &entity, int preloadDelta = 0);
-	void setContext(base::optional_variant<
+	void setContext(std::variant<
+		v::null_t,
 		not_null<HistoryItem*>,
 		not_null<PeerData*>> context);
 
@@ -358,6 +372,8 @@ private:
 	void clearStreaming(bool savePosition = true);
 	bool canInitStreaming() const;
 
+	void applyHideWindowWorkaround();
+
 	QBrush _transparentBrush;
 
 	Main::Session *_session = nullptr;
@@ -500,6 +516,7 @@ private:
 	QRect _saveMsg;
 	QTimer _saveMsgUpdater;
 	Ui::Text::String _saveMsgText;
+	SavePhotoVideo _savePhotoVideoWhenLoaded = SavePhotoVideo::None;
 
 	base::flat_map<OverState, crl::time> _animations;
 	base::flat_map<OverState, anim::value> _animationOpacities;

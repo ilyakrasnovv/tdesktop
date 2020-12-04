@@ -109,7 +109,7 @@ public:
 	}
 	bool hasFilteredResults() const;
 
-	void searchInChat(Key key, UserData *from);
+	void searchInChat(Key key, PeerData *from);
 
 	void applyFilterUpdate(QString newFilter, bool force = false);
 	void onHashtagFilterUpdate(QStringRef newFilter);
@@ -119,7 +119,7 @@ public:
 	void setLoadMoreCallback(Fn<void()> callback);
 	[[nodiscard]] rpl::producer<> listBottomReached() const;
 
-	base::Observable<UserData*> searchFromUserChanged;
+	base::Observable<PeerData*> searchFromUserChanged;
 
 	[[nodiscard]] rpl::producer<ChosenRow> chosenRow() const;
 	[[nodiscard]] rpl::producer<> updated() const;
@@ -287,6 +287,10 @@ private:
 		Painter &p,
 		int top,
 		const Ui::Text::String &text) const;
+	void paintSearchInReplies(
+		Painter &p,
+		int top,
+		const Ui::Text::String &text) const;
 	//void paintSearchInFeed( // #feed
 	//	Painter &p,
 	//	not_null<Data::Feed*> feed,
@@ -391,7 +395,7 @@ private:
 
 	Key _searchInChat;
 	History *_searchInMigrated = nullptr;
-	UserData *_searchFromUser = nullptr;
+	PeerData *_searchFromPeer = nullptr;
 	mutable std::shared_ptr<Data::CloudImageView> _searchInChatUserpic;
 	mutable std::shared_ptr<Data::CloudImageView> _searchFromUserUserpic;
 	Ui::Text::String _searchInChatText;
