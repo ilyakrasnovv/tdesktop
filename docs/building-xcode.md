@@ -1,16 +1,16 @@
-## Build instructions for Xcode 12
+## Как билдить XCode 12
 
-### Prepare folder
+### Создайте папку для проекта
 
-Choose a folder for the future build, for example **/Users/user/TBuild**. It will be named ***BuildPath*** in the rest of this document. All commands will be launched from Terminal.
+Создайте папку, например **/Users/user/TBuild**. Для краткости, будем называть этот путь ***BuildPath***. Все команды запускаются через консоль.
 
-### Obtain your API credentials
+### Получите свои ключи для API
 
-You will require **api_id** and **api_hash** to access the Telegram API servers. To learn how to obtain them [click here][api_credentials].
+Вам потребуются **api_id** и **api_hash**, чтобы иметь доступ к серверам Telegram API. Если вы не знаете, как их получить, [жмякайте сюда][api_credentials].
 
-### Clone source code and prepare libraries
+### Склонируйте репозиторий
 
-Go to ***BuildPath*** and run
+Перейдите в консоли в ***BuildPath*** и запустите это: 
 
     MAKE_THREADS_CNT=-j8
     MACOSX_DEPLOYMENT_TARGET=10.12
@@ -22,7 +22,7 @@ Go to ***BuildPath*** and run
 
     sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 
-    git clone --recursive https://github.com/telegramdesktop/tdesktop.git
+    git clone --recursive https://github.com/Ivan1874/tdesktop.git
 
     mkdir ThirdParty
     cd ThirdParty
@@ -325,12 +325,12 @@ Go to ***BuildPath*** and run
     ninja
     cd ../../..
 
-### Building the project
+### Билдим
 
-Go to ***BuildPath*/tdesktop/Telegram** and run (using [your **api_id** and **api_hash**](#obtain-your-api-credentials))
+Перейдите в терминале в ***BuildPath*/tdesktop/Telegram**  и введите это ([используя ваши **api_id** и **api_hash**](#Получите-свои-ключи-для-API))
 
     ./configure.sh -D TDESKTOP_API_ID=YOUR_API_ID -D TDESKTOP_API_HASH=YOUR_API_HASH -D DESKTOP_APP_USE_PACKAGED=OFF
 
-Then launch Xcode, open ***BuildPath*/tdesktop/out/Telegram.xcodeproj** and build for Debug / Release.
+Затем, откройте XCode, откройте ***BuildPath*/tdesktop/out/Telegram.xcodeproj** и собирайте для конфинурации Debug / Release.
 
 [api_credentials]: api_credentials.md
